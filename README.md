@@ -30,7 +30,8 @@ Notes that save you a support ticket:
 - **Phone reveals are asynchronous.** `reveal_phone_number=true` requires a
   public HTTPS `webhookUrl`; Apollo POSTs the numbers there minutes later. The
   synchronous response carries a `request_id` — poll `apollo_webhook_result`
-  with it if the callback is missed (results kept 30 days).
+  with it if the callback is missed (results kept 30 days). Non-`https://`
+  webhook URLs are rejected by both the MCP tools and the gateway export.
 - **Master API key.** `apollo_people_search` and `apollo_credit_usage` require
   a *master* Apollo API key (Apollo returns 403 `API_INACCESSIBLE` otherwise).
 - **No credit-balance API.** Apollo only exposes per-endpoint rate-limit usage;
@@ -55,7 +56,7 @@ APOLLO_API_KEY=... MCP_HTTP_TOKEN=... node dist/transports/http.js
 Configuration (see `.env.example`): `APOLLO_API_KEY` (required),
 `APOLLO_TIMEOUT_MS`, `APOLLO_AUDIT_LOG` (JSONL audit trail; hashed targets,
 never raw arguments or secrets), and for HTTP: `MCP_HTTP_HOST`, `PORT`,
-`MCP_HTTP_TOKEN` (static bearer), `MCP_ALLOWED_ORIGINS`, `MCP_MAX_BODY_BYTES`.
+`MCP_HTTP_TOKEN` (static bearer, compared in constant time), `MCP_ALLOWED_ORIGINS`, `MCP_MAX_BODY_BYTES`.
 
 There is also an embeddable gateway export (`mcp-server-apollo/gateway`) that
 exposes the same tools as plain functions with JSON-schema definitions.

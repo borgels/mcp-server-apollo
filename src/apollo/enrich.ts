@@ -1,6 +1,7 @@
 import { callWithRateLimitRetry, runBatch, type RunBatchOptions } from './batch.js';
 import type { ApolloClient, QueryValue } from './client.js';
 import { selectFields } from './fields.js';
+import { encodePathParam } from '../path-params.js';
 
 export const MAX_BULK_DETAILS_PER_CALL = 10;
 export const MAX_BULK_ITEMS = 100;
@@ -43,6 +44,27 @@ export function assertRevealFlags(input: RevealFlags): void {
     throw new Error(
       'reveal_phone_number requires webhookUrl: Apollo delivers phone numbers asynchronously to a public HTTPS webhook.',
     );
+  }
+  if (input.webhookUrl !== undefined) {
+    assertHttpsWebhookUrl(input.webhookUrl);
+  }
+}
+
+/**
+ * Phone numbers are personal data: only ever hand Apollo an https:// callback.
+ * Enforced here so every entry point (MCP tools and the gateway) gets it.
+ */
+export function assertHttpsWebhookUrl(value: unknown): void {
+  let parsed: URL | undefined;
+  if (typeof value === 'string') {
+    try {
+      parsed = new URL(value.trim());
+    } catch {
+      parsed = undefined;
+    }
+  }
+  if (!parsed || parsed.protocol !== 'https:' || !parsed.hostname) {
+    throw new Error('webhookUrl must be a public HTTPS URL.');
   }
 }
 
@@ -323,5 +345,5 @@ export async function getWebhookResult(client: ApolloClient, requestId: string |
     throw new Error('requestId must be the integer request_id returned by an enrichment call.');
   }
 
-  return client.get<unknown>(`/api/v1/webhook_result/${encodeURIComponent(id)}`);
+  return client.get<unknown>(`/api/v1/webhook_result/${encodePathParam(id, 'requestId')}`);
 }
