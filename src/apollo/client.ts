@@ -1,4 +1,13 @@
+import { readEnvInteger } from '../config-env.js';
 import { ApolloHttpError } from '../errors.js';
+import {
+  describeUrl,
+  discardBody,
+  isRedirect,
+  readErrorBody,
+  redirectRefusedMessage,
+  registerSecret,
+} from '../upstream-http.js';
 
 export interface ApolloClientOptions {
   apiKey?: string;
@@ -32,12 +41,14 @@ export class ApolloClient {
 
   constructor(options: ApolloClientOptions = {}) {
     this.apiKey = options.apiKey ?? process.env.APOLLO_API_KEY;
+    registerSecret(this.apiKey);
     this.baseUrl = trimTrailingSlash(
       options.baseUrl ?? process.env.APOLLO_BASE_URL ?? 'https://api.apollo.io',
     );
     assertSafeBaseUrl(this.baseUrl);
     this.fetchImpl = options.fetchImpl ?? fetch;
-    this.timeoutMs = options.timeoutMs ?? Number(process.env.APOLLO_TIMEOUT_MS ?? 30_000);
+    this.timeoutMs =
+      options.timeoutMs ?? readEnvInteger('APOLLO_TIMEOUT_MS', 30_000, { min: 1, max: 600_000 });
   }
 
   async get<T>(path: string, query?: Record<string, QueryValue>): Promise<T> {
@@ -98,6 +109,8 @@ export class ApolloClient {
     const init: RequestInit = {
       method,
       headers,
+      // Never follow redirects: the x-api-key header would be re-sent to the new location.
+      redirect: 'manual',
       signal: AbortSignal.timeout(this.timeoutMs),
     };
 
@@ -109,19 +122,23 @@ export class ApolloClient {
     const response = await this.fetchImpl(url, init);
     this.captureRateLimitHeaders(response);
 
-    const responseBody = await readResponseBody(response);
+    if (isRedirect(response.status)) {
+      await discardBody(response);
+      throw new Error(redirectRefusedMessage('Apollo API', response, method, url));
+    }
 
     if (!response.ok) {
+      const errorBody = await readErrorBody(response);
       throw new ApolloHttpError({
         status: response.status,
-        url,
-        payload: responseBody,
+        url: describeUrl(url),
+        payload: errorBody,
         retryAfter: response.headers.get('retry-after') ?? undefined,
-        fallbackMessage: typeof responseBody === 'string' ? responseBody : undefined,
+        fallbackMessage: typeof errorBody === 'string' ? errorBody : undefined,
       });
     }
 
-    return responseBody as T;
+    return (await readResponseBody(response)) as T;
   }
 
   private captureRateLimitHeaders(response: Response): void {

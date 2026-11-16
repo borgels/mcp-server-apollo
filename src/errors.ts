@@ -1,3 +1,5 @@
+import { redactRegisteredSecrets, truncate } from './upstream-http.js';
+
 export interface ApolloErrorPayload {
   error?: string;
   message?: string;
@@ -47,7 +49,7 @@ export function redactSecrets(value: string): string {
         const key = match.split(separator)[0]?.trim() ?? 'secret';
         return `${key}${separator} [REDACTED]`;
       }),
-    value,
+    redactRegisteredSecrets(value),
   );
 }
 
@@ -62,13 +64,21 @@ function formatApolloHttpError(input: {
   const parts = [
     `Apollo API request failed with HTTP ${input.status}`,
     payload?.error_code === undefined ? undefined : `error_code=${payload.error_code}`,
-    payload?.error,
-    payload?.message,
-    input.retryAfter ? `retry-after=${input.retryAfter}s` : undefined,
-    input.fallbackMessage,
+    textField(payload?.error),
+    textField(payload?.message),
+    input.retryAfter ? `retry-after=${truncate(input.retryAfter, 64)}s` : undefined,
+    // Redact before truncating, so a secret is never cut in half and left partly visible.
+    input.fallbackMessage === undefined ? undefined : truncate(redactSecrets(input.fallbackMessage.trim())),
   ].filter(Boolean);
 
   return redactSecrets(parts.join(' | '));
+}
+
+function textField(value: unknown): string | undefined {
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    return undefined;
+  }
+  return truncate(redactSecrets(String(value)));
 }
 
 function isApolloErrorPayload(value: unknown): value is ApolloErrorPayload {

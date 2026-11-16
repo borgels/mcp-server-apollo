@@ -158,3 +158,56 @@ describe('redactSecrets', () => {
     expect(redactSecrets('{"api_key":"super-secret"}')).not.toContain('super-secret');
   });
 });
+
+describe('ApolloClient upstream hardening', () => {
+  it('never follows redirects and does not leak the redirect query string', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(null, { status: 302, headers: { location: 'https://elsewhere.example/x?sig=abc' } }),
+    );
+    const client = makeClient(fetchMock);
+
+    const error = await client.get('/api/v1/thing', { q_keywords: 'private' }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/redirect \(HTTP 302\) to https:\/\/elsewhere\.example\/x/);
+    expect((error as Error).message).not.toContain('sig=abc');
+    expect((error as Error).message).not.toContain('private');
+    expect(fetchMock.mock.calls[0]![1]?.redirect).toBe('manual');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads at most 64 KB of an error body and truncates the message', async () => {
+    const huge = 'x'.repeat(1_000_000);
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(huge, { status: 500 }));
+    const client = makeClient(fetchMock);
+
+    const error = await client.get('/api/v1/thing').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApolloHttpError);
+    expect((error as Error).message.length).toBeLessThan(1_000);
+  });
+
+  it('redacts the configured key by value before truncating', async () => {
+    const key = 'configured-apollo-key-0123456789';
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      new Response(`${'y'.repeat(490)}${key}`, { status: 400 }),
+    );
+    const client = new ApolloClient({ apiKey: key, baseUrl: 'https://example.test', fetchImpl: fetchMock });
+
+    const error = await client.get('/api/v1/thing').catch((e: unknown) => e);
+    expect((error as Error).message).not.toContain(key.slice(0, 10));
+    expect((error as ApolloHttpError).url).toBe('https://example.test/api/v1/thing');
+  });
+
+  it('rejects an invalid APOLLO_TIMEOUT_MS instead of producing NaN', () => {
+    const original = process.env.APOLLO_TIMEOUT_MS;
+    process.env.APOLLO_TIMEOUT_MS = 'abc';
+    try {
+      expect(() => new ApolloClient({ apiKey: 'k' })).toThrow(/APOLLO_TIMEOUT_MS/);
+    } finally {
+      if (original === undefined) {
+        delete process.env.APOLLO_TIMEOUT_MS;
+      } else {
+        process.env.APOLLO_TIMEOUT_MS = original;
+      }
+    }
+  });
+});
