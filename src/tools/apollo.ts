@@ -64,8 +64,9 @@ const personIdentifierShape = {
 const webhookUrlSchema = z
   .string()
   .trim()
-  .url()
+  // startsWith before url(): with url() last, tools/list advertises format "uri".
   .startsWith('https://', 'webhookUrl must be a public HTTPS URL.')
+  .url()
   .optional()
   .describe('Public HTTPS endpoint Apollo POSTs phone numbers to. Required when revealPhoneNumber=true.');
 

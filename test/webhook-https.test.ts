@@ -34,3 +34,27 @@ describe('webhookUrl must be https in every entry point', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
+
+describe('advertised webhookUrl schema', () => {
+  it('lists webhookUrl as format "uri" with an https pattern', async () => {
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+    const { ApolloClient } = await import('../src/apollo/client.js');
+    const { createServer } = await import('../src/server.js');
+
+    const server = createServer({ client: new ApolloClient({ apiKey: 'k', baseUrl: 'https://example.test' }) });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const mcp = new Client({ name: 'test', version: '0' });
+    await Promise.all([server.connect(serverTransport), mcp.connect(clientTransport)]);
+
+    const { tools } = await mcp.listTools();
+    for (const name of ['apollo_person_enrich', 'apollo_people_bulk_enrich']) {
+      const tool = tools.find(entry => entry.name === name);
+      const webhookUrl = (tool?.inputSchema.properties as Record<string, { format?: string; pattern?: string }>)
+        .webhookUrl;
+      expect(webhookUrl?.format, name).toBe('uri');
+      expect(webhookUrl?.pattern, name).toMatch(/^\^https/);
+    }
+    await mcp.close();
+  });
+});
