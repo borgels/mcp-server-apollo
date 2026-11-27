@@ -281,3 +281,34 @@ describe('custom fields', () => {
     expect(JSON.stringify(result)).not.toContain('Jane Doe');
   });
 });
+
+describe('the owner changes only through its own tools', () => {
+  it('refuses an owner on create_account, update_account and update_contact, and sends nothing', async () => {
+    let calls = 0;
+    const gw = createApolloGateway({
+      apiKey: TOKEN,
+      fetchImpl: async () => {
+        calls += 1;
+        return json({ account: { id: ID } });
+      },
+      policy: { enableWrites: true },
+    });
+    for (const [tool, input] of [
+      ['create_account', { name: 'Acme', ownerId: ID }],
+      ['update_account', { accountId: ID, ownerId: ID }],
+      ['update_account', { accountId: ID, phone: '+4512345678', ownerId: ID }],
+      ['update_contact', { contactId: ID, ownerId: ID }],
+      ['create_contact', { firstName: 'Ada', ownerId: ID }],
+    ] as const) {
+      const result = await gw.callTool(tool, input);
+      expect(result.isError, tool).toBe(true);
+    }
+    expect(calls).toBe(0);
+    const schemas = Object.fromEntries(gw.tools.map(tool => [tool.name.replace(/^apollo_/, ''), JSON.stringify(tool.inputSchema)]));
+    for (const name of ['create_account', 'update_account', 'create_contact', 'update_contact']) {
+      expect(schemas[name], name).toBeDefined();
+      expect(schemas[name], name).not.toMatch(/owner/i);
+    }
+    expect(schemas['set_account_owner']).toMatch(/ownerId/);
+  });
+});

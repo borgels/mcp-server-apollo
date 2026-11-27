@@ -177,7 +177,7 @@ export const FIXED_CORPUS: readonly string[] = [
   "CERT_HAS_EXPIRED",
   "Cache-Control",
   "Change a deal’s name, amount, stage, owner, close date or custom fields.",
-  "Change a saved account’s name, domain, owner, stage, phone, address or custom fields.",
+  "Change a saved account’s name, domain, stage, phone, address or custom fields. The owner changes only with apollo_set_account_owner.",
   "Change a saved contact’s name, title, employer, email, phones, stage, lists or custom fields.",
   "Check Apollo connection",
   "Companies found.",
