@@ -1,4 +1,4 @@
-import { formatUnknownError, ApolloHttpError } from '../errors.js';
+import { formatUnknownError, ApolloAnswerError, ApolloHttpError } from '../errors.js';
 
 export const DEFAULT_BATCH_CONCURRENCY = 4;
 export const MAX_BATCH_CONCURRENCY = 8;
@@ -112,7 +112,9 @@ export async function callWithRateLimitRetry<T>(
     try {
       return await thunk();
     } catch (error) {
-      if (!(error instanceof ApolloHttpError) || error.status !== 429 || attempt >= maxAttempts) {
+      // The MCP server's client throws ApolloHttpError, the embedded gateway's ApolloAnswerError; both carry the status.
+      const limited = (error instanceof ApolloHttpError || error instanceof ApolloAnswerError) && error.status === 429;
+      if (!limited || attempt >= maxAttempts) {
         throw error;
       }
 
@@ -120,7 +122,7 @@ export async function callWithRateLimitRetry<T>(
         throw error;
       }
 
-      const baseDelay = retryAfterMs(error.retryAfter) * attempt;
+      const baseDelay = retryAfterMs((error as { retryAfter?: string }).retryAfter) * attempt;
       const jitteredDelay = baseDelay * (1 + jitter() * 0.25);
       await sleep(Math.min(jitteredDelay, maxDelayMs));
     }

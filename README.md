@@ -5,8 +5,9 @@ discovery and enrichment API: company search, people search, contact
 enrichment (emails/phones), organization firmographics, and API usage stats.
 
 The server wraps Apollo's REST API with one account-level API key kept
-server-side. It is read-only by design: no sequences, no emailer, no CRM
-writes, no account management.
+server-side. The MCP server's own tools are read-only; the embeddable gateway
+also covers the everyday CRM work (contacts, accounts, deals, tasks and
+sequence enrollment) behind a host policy, and never deletes anything.
 
 This is an independent, unofficial project. It is not developed, endorsed or supported by Apollo.io.
 
@@ -78,8 +79,63 @@ Invalid numeric or boolean values stop the server at startup with a message
 naming the variable. `GET /healthz` answers `{"status":"ok"}` without
 authentication, for container health checks.
 
-There is also an embeddable gateway export (`mcp-server-apollo/gateway`) that
-exposes the same tools as plain functions with JSON-schema definitions.
+## Embedding (`mcp-server-apollo/gateway`)
+
+The gateway export is built for hosts that serve several teams from one
+process and do their own per-user authorization:
+
+```ts
+import { createApolloGateway, apolloToolCatalog } from 'mcp-server-apollo/gateway';
+
+const gateway = createApolloGateway({
+  apiKey: teamApiKey,            // required; never read from the environment
+  policy: { enableWrites: true }, // writes are off by default
+});
+const result = await gateway.callTool('search_contacts', { qKeywords: 'Jane' }, { caller: 'user-1' });
+```
+
+- It talks to `https://api.apollo.io` only and reads no `APOLLO_*` variable.
+- `apolloToolCatalog` lists every tool with its risk level (`read` or
+  `write`; none is `destructive`), the `broad` mark (no tool is broad) and
+  every Apollo request it may make. The client refuses any other request.
+- Errors are the server's own texts chosen by HTTP status. An error result
+  carries `failure` (HTTP status, Apollo's request id when a response header
+  gives one in the form of an id, the method and the path template), never
+  Apollo's body.
+- A key must be printable ASCII of at least 16 characters and may share no
+  6-character piece with the server's own texts; every output is checked in
+  its final form and withheld when it holds a piece of the key.
+
+| Gateway tool | Risk | Apollo endpoint |
+| --- | --- | --- |
+| `search_capabilities` | read | — |
+| `check_connection` | read | `GET /users/api_profile` |
+| `companies_search` | read + 1 credit/page | `POST /mixed_companies/search` |
+| `people_search` | read (master key) | `POST /mixed_people/api_search` |
+| `person_enrich` | read + credits | `POST /people/match` |
+| `people_bulk_enrich` | read + credits | `POST /people/bulk_match` |
+| `org_enrich` | read + 1 credit | `GET /organizations/enrich` |
+| `credit_usage` | read (usage needs a master key) | `GET /users/api_profile`, `POST /usage_stats/api_usage_stats` |
+| `search_contacts`, `get_contact` | read | `POST /contacts/search`, `GET /contacts/{id}` |
+| `search_accounts`, `get_account` | read | `POST /accounts/search`, `GET /accounts/{id}` |
+| `search_deals`, `get_deal` | read | `GET /opportunities/search`, `GET /opportunities/{id}` |
+| `search_tasks` | read | `POST /tasks/search` |
+| `search_sequences` | read | `POST /emailer_campaigns/search` |
+| `list_users` | read (master key) | `GET /users/search` |
+| `list_email_accounts` | read | `GET /email_accounts` |
+| `list_stages` | read | `GET /contact_stages`, `/account_stages`, `/opportunity_stages` |
+| `create_contact`, `update_contact` | write | `POST /contacts`, `PATCH /contacts/{id}` |
+| `set_contact_stage`, `set_contact_owner` | write | `POST /contacts/update_stages`, `/contacts/update_owners` |
+| `create_account`, `update_account`, `set_account_owner` | write | `POST /accounts`, `PATCH /accounts/{id}`, `POST /accounts/update_owners` |
+| `create_deal`, `update_deal` | write | `POST /opportunities`, `PATCH /opportunities/{id}` |
+| `create_task`, `complete_task` | write | `POST /tasks`, `POST /tasks/{id}/complete` |
+| `add_contacts_to_sequence` | write (the sequence then sends email) | `POST /emailer_campaigns/{id}/add_contact_ids` |
+
+Nothing in the gateway deletes, merges, manages users or settings, or
+reveals phone numbers (a reveal needs a public webhook that would receive
+personal data outside the host). An Apollo key can be scoped to selected
+endpoints or set as a master key, which reaches every endpoint; tools whose
+endpoint the key cannot reach fail with HTTP 403.
 
 ## Security
 
