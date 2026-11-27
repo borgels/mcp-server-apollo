@@ -3,11 +3,12 @@ import { apolloGatewayTools, createApolloGateway } from '../src/gateway.js';
 import { assertHttpsWebhookUrl } from '../src/apollo/enrich.js';
 
 describe('webhookUrl must be https in every entry point', () => {
-  it('declares https in the gateway input schemas', () => {
+  it('gives the gateway no webhook input at all', () => {
     for (const name of ['person_enrich', 'people_bulk_enrich']) {
       const tool = apolloGatewayTools.find(t => t.name === name)!;
-      const props = (tool.inputSchema as { properties: Record<string, { pattern?: string }> }).properties;
-      expect(props.webhookUrl?.pattern).toBe('^https://');
+      const props = (tool.inputSchema as { properties: Record<string, unknown> }).properties;
+      expect(props.webhookUrl).toBeUndefined();
+      expect(props.revealPhoneNumber).toBeUndefined();
     }
   });
 
@@ -22,15 +23,13 @@ describe('webhookUrl must be https in every entry point', () => {
     expect(() => assertHttpsWebhookUrl('https://hooks.example.com/apollo')).not.toThrow();
   });
 
-  it('gateway refuses a non-https webhook before calling Apollo', async () => {
+  it('gateway refuses a webhook before calling Apollo', async () => {
     const fetchImpl = vi.fn();
-    const gateway = createApolloGateway({ apiKey: 'test', fetchImpl: fetchImpl as unknown as typeof fetch });
-    await expect(
-      gateway.callTool('person_enrich', { email: 'a@example.com', revealPhoneNumber: true, webhookUrl: 'http://example.com/hook' }),
-    ).rejects.toThrow(/HTTPS/);
-    await expect(
-      gateway.callTool('people_bulk_enrich', { details: [{ email: 'a@example.com' }], revealPhoneNumber: true, webhookUrl: 'http://example.com/hook' }),
-    ).rejects.toThrow(/HTTPS/);
+    const gateway = createApolloGateway({ apiKey: ['Zq7pX2vK9mWb', '4TnR8yLc3HdJ6fGs1QeU'].join(''), fetchImpl: fetchImpl as unknown as typeof fetch });
+    const one = await gateway.callTool('person_enrich', { email: 'a@example.com', revealPhoneNumber: true, webhookUrl: 'https://example.com/hook' });
+    const many = await gateway.callTool('people_bulk_enrich', { details: [{ email: 'a@example.com' }], webhookUrl: 'https://example.com/hook' });
+    expect(one.isError).toBe(true);
+    expect(many.isError).toBe(true);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 });
