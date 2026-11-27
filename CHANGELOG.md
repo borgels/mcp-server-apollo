@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.4.0 (2026-11-27)
+
+The embeddable gateway (`mcp-server-apollo/gateway`) is rebuilt for
+multi-tenant hosts and gains the everyday sales work in the team's own Apollo
+data. The MCP server's own tools are unchanged.
+
+- `createApolloGateway({ apiKey, fetchImpl?, timeoutMs?, policy? })`: the key
+  is required and never read from the environment; the gateway talks to
+  `https://api.apollo.io` only and reads no `APOLLO_*` variable.
+- Key admission and the sink check: a key must be printable ASCII of at least
+  16 characters and share no 6-character piece with the server's own texts;
+  every output (tool list, results, audit records, construction errors) is
+  checked in its final form and replaced by a fixed fallback when it holds a
+  piece of the key.
+- Host policy per instance (`enableWrites`, `disabledTools`, `audit`), every
+  call in a scope of its own; writes are off unless the host enables them.
+- `apolloToolCatalog`: a deeply frozen catalog with each tool's risk level,
+  `broad` mark (no tool is broad) and every Apollo request it may make. The
+  client refuses a request the tool did not declare.
+- Errors are our own texts chosen by HTTP status; an error result carries
+  `failure` metadata (HTTP status, request id from a response header in the
+  form of one, method and path template), never Apollo's body.
+- New read tools: `check_connection`, `search_contacts`, `get_contact`,
+  `search_accounts`, `get_account`, `search_deals`, `get_deal`,
+  `search_tasks`, `search_sequences`, `list_users`, `list_email_accounts`,
+  `list_stages`. `credit_usage` now also reports the remaining credits.
+- New write tools: `create_contact`, `update_contact`, `set_contact_stage`,
+  `set_contact_owner`, `create_account`, `update_account`,
+  `set_account_owner`, `create_deal`, `update_deal`, `create_task`,
+  `complete_task`, `add_contacts_to_sequence`. None deletes anything.
+- CRM answers are projected onto an allowlist of fields; a mailbox's sending
+  credentials are never passed on.
+- The gateway has no phone reveal and no `webhook_result`: a reveal needs a
+  public webhook that receives personal data outside the host.
+
+
 ## 0.3.0 (2026-11-21)
 
 - License changed from Apache-2.0 to the Functional Source License, Version 1.1,
