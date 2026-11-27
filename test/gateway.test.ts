@@ -200,6 +200,25 @@ describe('requests', () => {
     expect(result.structuredContent).toEqual({ email_accounts: [{ id: 'm1', email: 'sales@example.com', active: true }] });
   });
 
+  it('sorts deals by the fields Apollo documents', async () => {
+    for (const sortByField of ['opportunity_created_at', 'opportunity_updated_at', 'opportunity_close_date', 'amount', 'is_closed', 'is_won']) {
+      const { seen, fetchImpl } = recording(() => ({ opportunities: [] }));
+      const result = await gateway(fetchImpl).callTool('search_deals', { sortByField });
+      expect(result.isError, sortByField).toBeUndefined();
+      expect(seen[0]!.query.get('sort_by_field')).toBe(sortByField);
+    }
+    const { seen, fetchImpl } = recording();
+    expect((await gateway(fetchImpl).callTool('search_deals', { sortByField: 'closed_date' })).isError).toBe(true);
+    expect(seen).toEqual([]);
+  });
+
+  it('says that a task Apollo has deleted was not completed', async () => {
+    const { fetchImpl } = recording(() => ({ task: { id: ID, deleted: true } }));
+    const result = await gateway(fetchImpl).callTool('complete_task', { taskId: ID });
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toMatch(/nothing was completed/);
+  });
+
   it('lists the stages of each kind', async () => {
     const { seen, fetchImpl } = recording(({ path }) =>
       path.endsWith('opportunity_stages') ? { opportunity_stages: [{ id: 'd1', name: 'Won', is_won: true, salesforce_id: 'x' }] } : {},

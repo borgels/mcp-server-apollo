@@ -322,24 +322,45 @@ function buildApolloGateway(options: ApolloGatewayOptions, apiKey: string, redac
       const denied = policyDenial(name, tool);
       const target = auditTarget(values);
       if (denied) {
-        await writeGatewayAuditEvent({ tool: name, action: 'policy_denied', target, reason: denied });
+        // The refusal stands whether or not the sink takes the record.
+        await bestEffortAudit({ tool: name, action: 'policy_denied', target, reason: denied });
         return errorResult(denied);
       }
-      await writeGatewayAuditEvent({ tool: name, action: 'start', target });
+      // A tool runs only when its start record was accepted. A sink that throws refuses the call with our own fixed
+      // text: the sink's error is the host's and is never passed on (it may name the host's own systems).
+      try {
+        await writeGatewayAuditEvent({ tool: name, action: 'start', target });
+      } catch {
+        return errorResult(AUDIT_REFUSED);
+      }
       let data: unknown;
       try {
         // The tool may make only the requests it declares (src/apollo/gateway-client.ts).
         data = await tool.run(client.forTool(tool.upstream, redactor), values, offered);
       } catch (error) {
-        await writeGatewayAuditEvent({ tool: name, action: 'error', target, status: 'error', error });
+        await bestEffortAudit({ tool: name, action: 'error', target, status: 'error', error });
         throw error;
       }
-      await writeGatewayAuditEvent({ tool: name, action: 'finish', target, status: 'ok' });
+      // The call has happened at Apollo: a sink that fails on the finish record does not turn a completed change into
+      // an error, which a caller might retry and so make twice.
+      await bestEffortAudit({ tool: name, action: 'finish', target, status: 'ok' });
       // Twice: the second pass, the last step, also covers what the first inserted (the depth placeholder).
       return jsonResult(tool.summary, redactDeep(redactDeep(data, redactor), redactor));
     } catch (error) {
       return errorResult(redactText(error instanceof Error ? error.message : String(error), redactor), failureMetadata(error));
     }
+  }
+}
+
+/** The text of a call refused because the host's audit sink did not take its start record. */
+const AUDIT_REFUSED = 'Refused: the audit record of this call could not be written, so nothing was sent to Apollo.';
+
+/** An audit record after the outcome is decided: a sink that throws changes nothing about the result. */
+async function bestEffortAudit(event: Parameters<typeof writeGatewayAuditEvent>[0]): Promise<void> {
+  try {
+    await writeGatewayAuditEvent(event);
+  } catch {
+    // The host's sink failed; the outcome stands, and the sink's error is not passed on.
   }
 }
 

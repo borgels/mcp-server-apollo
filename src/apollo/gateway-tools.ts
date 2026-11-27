@@ -649,7 +649,9 @@ export const GATEWAY_TOOLS: readonly GatewayTool[] = [
       amountMax: z.number().min(0).optional(),
       closeDateFrom: isoDate.optional(),
       closeDateTo: isoDate.optional(),
-      sortByField: z.enum(['amount', 'is_closed', 'is_won', 'closed_date', 'created_at', 'last_activity_date']).optional(),
+      sortByField: z
+        .enum(['opportunity_created_at', 'opportunity_updated_at', 'opportunity_close_date', 'amount', 'is_closed', 'is_won'])
+        .optional(),
       sortAscending: z.boolean().optional(),
       ...paging,
     },
@@ -956,6 +958,10 @@ export const GATEWAY_TOOLS: readonly GatewayTool[] = [
         `/api/v1/tasks/${id(input, 'taskId')}/complete`,
         input.note === undefined ? {} : { note: input.note },
       );
+      // Apollo answers 200 with the task marked deleted when it no longer exists: nothing was completed.
+      if (asObject(asObject(answer)?.task)?.deleted === true) {
+        throw new Error('Apollo has no such task any more (it was deleted); nothing was completed.');
+      }
       return one(answer, 'task', TASK);
     },
   },

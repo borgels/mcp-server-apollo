@@ -63,6 +63,8 @@ const SHOWN_NETWORK_CODES: ReadonlySet<string> = new Set([
 export class ApolloGatewayHttpError extends ApolloAnswerError {
   readonly method: string;
   readonly pathTemplate?: string;
+  /** Apollo's Retry-After, as a whole number of seconds; used by the bulk enrichment's retry. */
+  readonly retryAfter?: string;
 
   constructor(status: number, method: string, pathTemplate: string | undefined, retryAfter?: string, requestId?: string) {
     const hint = Object.hasOwn(STATUS_HINTS, status) ? ` ${STATUS_HINTS[status]}` : '';
@@ -71,6 +73,7 @@ export class ApolloGatewayHttpError extends ApolloAnswerError {
     this.name = 'ApolloHttpError';
     this.method = method;
     this.pathTemplate = pathTemplate;
+    this.retryAfter = retryAfter;
   }
 }
 
