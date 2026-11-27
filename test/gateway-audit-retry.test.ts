@@ -236,3 +236,23 @@ describe('two instances at once', () => {
     expect(JSON.stringify(rb)).not.toContain(TOKEN);
   });
 });
+
+describe('bulk enrichment input', () => {
+  it('sends nothing when any entry has no usable identifier', async () => {
+    for (const bad of [{}, { firstName: 'Jane' }] as Array<Record<string, string>>) {
+      let calls = 0;
+      const gw = createApolloGateway({
+        apiKey: TOKEN,
+        fetchImpl: async () => {
+          calls += 1;
+          return json({ matches: [] });
+        },
+      });
+      const details = [...Array.from({ length: 10 }, () => ({ id: ID })), bad];
+      const result = await gw.callTool('people_bulk_enrich', { details });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toMatch(/details\[10\] has no usable identifier/);
+      expect(calls).toBe(0);
+    }
+  });
+});

@@ -523,6 +523,13 @@ export const GATEWAY_TOOLS: readonly GatewayTool[] = [
       // call with its status, so a host sees it. Once people are enriched (their credits are spent), a failing chunk
       // stops the run: the people enriched so far are kept, and the rest are failed items with Apollo's status only.
       const details = input.details as Array<Record<string, unknown>>;
+      // Every entry is checked before anything is sent, so no credits are spent on a batch that fails later.
+      for (const [index, detail] of details.entries()) {
+        const usable =
+          ['id', 'email', 'linkedinUrl', 'name', 'domain', 'organizationName'].some(field => typeof detail[field] === 'string') ||
+          (typeof detail.firstName === 'string' && typeof detail.lastName === 'string');
+        if (!usable) throw new Error(`details[${index}] has no usable identifier.`);
+      }
       const fields: Record<string, string> = {
         id: 'id', firstName: 'first_name', lastName: 'last_name', name: 'name', email: 'email',
         organizationName: 'organization_name', domain: 'domain', linkedinUrl: 'linkedin_url',
