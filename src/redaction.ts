@@ -19,8 +19,9 @@ const SECRET_PATTERNS = [
   // whole value up to a space, quote, comma or brace, whatever its length.
   /\b(bearer|basic)\s+[^\s"',}]*‹redacted›[^\s"',}]*/gi,
   /Authorization:\s*(Bearer|Basic|Token)\s+[^,\s}]+/gi,
-  // A credential-named assignment in text: `X-Api-Key: S`, `api_token=S`, `?access_token=S`, `"apiToken": "S"`.
-  /(APOLLO_API_KEY|MCP_HTTP_TOKEN|(?:x[-_]?)?api[-_]?(?:key|token|secret)|client[-_]?secret|(?:access|refresh|auth|id|session|bearer)[-_]?token|accessToken|apiKey|apiToken|token|password|passwd|secret|product[-_]?key)["']?\s*[:=]\s*["']?[^"',\s}&]+/gi,
+  // A credential-named assignment in text: `X-Api-Key: S`, `api_token=S`, `?access_token=S`, `"apiToken": "S"`; a
+  // quoted value is masked whole, spaces and all (`password="correct horse"`).
+  /(APOLLO_API_KEY|MCP_HTTP_TOKEN|(?:x[-_]?)?api[-_]?(?:key|token|secret)|client[-_]?secret|(?:access|refresh|auth|id|session|bearer)[-_]?token|accessToken|apiKey|apiToken|token|password|passwd|secret|product[-_]?key)["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^"',\s}&]+)/gi,
   // A marker left by the secrets' redaction (‹redacted›) counts as part of a value, so the rest of it is masked too.
   /\b(Bearer|Basic)\s+(?:[A-Za-z0-9._~+/-]|‹redacted›)+=*/g,
   // Any case ("bearer", "BASIC"), when what follows looks like a token: 8 or more base64 or base64url characters. A

@@ -177,4 +177,62 @@ describe('the rate limit', () => {
     expect(result.isError).toBeUndefined();
     expect(JSON.stringify(result)).not.toMatch(/OTHERKEY|othersecret/);
   });
+
+  it('masks a quoted credential in free text whole', async () => {
+    const gw = createApolloGateway({
+      apiKey: TOKEN,
+      fetchImpl: async () => json({ contact: { id: ID, title: `password="correct horse battery staple" and api_key='one two'` } }),
+    });
+    const result = await gw.callTool('get_contact', { contactId: ID });
+    expect(JSON.stringify(result)).not.toMatch(/horse|battery|staple|one two/);
+  });
+});
+
+describe('two instances at once', () => {
+  it('keep their keys, policies, callers and audit records apart, also when one calls the other from inside a call', async () => {
+    const OTHER = 'Lz9Ux3Wv6Ty1Si4Rq7Po0Nm2Kl5Jh8Gf';
+    const seen: Array<{ key: string | null; path: string }> = [];
+    const recordsA: Array<Record<string, unknown>> = [];
+    const recordsB: Array<Record<string, unknown>> = [];
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => (release = resolve));
+    const fetchImpl: typeof fetch = async (url, init) => {
+      seen.push({ key: new Headers(init?.headers).get('x-api-key'), path: new URL(String(url)).pathname });
+      await gate;
+      return json({ contact: { id: ID } });
+    };
+    const b = createApolloGateway({ apiKey: OTHER, fetchImpl, policy: { enableWrites: false, audit: r => void recordsB.push({ ...r }) } });
+    let nested: unknown;
+    const a = createApolloGateway({
+      apiKey: TOKEN,
+      fetchImpl,
+      policy: {
+        enableWrites: true,
+        audit: async r => {
+          recordsA.push({ ...r });
+          // A call into the other instance from inside this one's sink runs under the other's policy only.
+          if (r.action === 'start' && nested === undefined) nested = await b.callTool('update_contact', { contactId: ID, title: 'x' });
+        },
+      },
+    });
+    const both = Promise.all([
+      a.callTool('update_contact', { contactId: ID, title: 'CEO' }, { caller: 'person-a' }),
+      b.callTool('get_contact', { contactId: ID }, { caller: 'person-b' }),
+    ]);
+    for (let i = 0; i < 100 && seen.length < 2; i += 1) await new Promise(resolve => setImmediate(resolve));
+    release();
+    const [ra, rb] = await both;
+    expect(ra.isError).toBeUndefined();
+    expect(rb.isError).toBeUndefined();
+    // The nested call into b is a write, and b's policy has writes off.
+    expect((nested as { isError?: boolean }).isError).toBe(true);
+    expect([...seen.map(s => s.key)].sort()).toEqual([OTHER, TOKEN].sort());
+    expect(recordsA.every(r => r.tool !== undefined)).toBe(true);
+    expect(recordsA.some(r => r.action === 'policy_denied')).toBe(false);
+    expect(recordsB.some(r => r.action === 'policy_denied')).toBe(true);
+    const callers = (records: Array<Record<string, unknown>>) => new Set(records.map(r => r.caller).filter(Boolean));
+    for (const caller of callers(recordsA)) expect(callers(recordsB).has(caller)).toBe(false);
+    expect(JSON.stringify(ra)).not.toContain(OTHER);
+    expect(JSON.stringify(rb)).not.toContain(TOKEN);
+  });
 });
