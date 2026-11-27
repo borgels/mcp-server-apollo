@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 (2026-11-27)
+
+- `apollo_create_account` and `apollo_update_account` no longer take `ownerId`.
+  The owner of a contact or an account changes only through
+  `apollo_set_contact_owner` and `apollo_set_account_owner`, so a host can
+  allow everyday edits without allowing a move to another user.
+
 ## 0.4.0 (2026-11-27)
 
 The embeddable gateway (`mcp-server-apollo/gateway`) is rebuilt for

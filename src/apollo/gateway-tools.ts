@@ -119,10 +119,14 @@ const contactFields = {
   typedCustomFields: customFields,
 };
 
+/**
+ * No owner here: moving a contact or an account to another user is its own
+ * tool (set_contact_owner, set_account_owner), so a host can allow everyday
+ * edits without allowing a change of owner.
+ */
 const accountFields = {
   name: shortText().optional(),
   domain: shortText().optional().describe('Domain without www., such as example.com.'),
-  ownerId: apolloId.optional().describe('A user in the team (apollo_list_users).'),
   accountStageId: apolloId.optional().describe('From apollo_list_stages with kind "account".'),
   phone: shortText(50).optional(),
   rawAddress: shortText(500).optional(),
@@ -385,7 +389,6 @@ const CONTACT_BODY: Record<string, string> = {
 const ACCOUNT_BODY: Record<string, string> = {
   name: 'name',
   domain: 'domain',
-  ownerId: 'owner_id',
   accountStageId: 'account_stage_id',
   phone: 'phone',
   rawAddress: 'raw_address',
@@ -938,7 +941,7 @@ export const GATEWAY_TOOLS: readonly GatewayTool[] = [
   {
     name: 'update_account',
     title: 'Update an account',
-    description: 'Change a saved account’s name, domain, owner, stage, phone, address or custom fields.',
+    description: 'Change a saved account’s name, domain, stage, phone, address or custom fields. The owner changes only with apollo_set_account_owner.',
     riskLevel: 'write',
     summary: 'Account updated.',
     upstream: [patch('/api/v1/accounts/{account_id}')],

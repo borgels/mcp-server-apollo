@@ -131,6 +131,10 @@ const result = await gateway.callTool('search_contacts', { qKeywords: 'Jane' }, 
 | `create_task`, `complete_task` | write | `POST /tasks`, `POST /tasks/{id}/complete` |
 | `add_contacts_to_sequence` | write (the sequence then sends email) | `POST /emailer_campaigns/{id}/add_contact_ids` |
 
+The owner of a contact or an account changes only through `set_contact_owner`
+and `set_account_owner`; the create and update tools take no owner, so a host
+can allow everyday edits without allowing a move to another user.
+
 Nothing in the gateway deletes, merges, manages users or settings, or
 reveals phone numbers (a reveal needs a public webhook that would receive
 personal data outside the host). An Apollo key can be scoped to selected
