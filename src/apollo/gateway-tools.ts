@@ -1,7 +1,9 @@
 import { z } from 'zod/v4';
 import type { ApolloClient, QueryValue } from './client.js';
 import { searchCompanies } from './companies.js';
-import { bulkEnrichPeople, enrichOrganization, enrichPerson } from './enrich.js';
+import { callWithRateLimitRetry } from './batch.js';
+import { enrichOrganization, enrichPerson } from './enrich.js';
+import { ApolloAnswerError } from '../errors.js';
 import type { ApolloGatewayClient, GatewayUpstream } from './gateway-client.js';
 import { searchPeople } from './people.js';
 import { encodePathParam } from '../path-params.js';
@@ -53,6 +55,14 @@ const apolloId = z
   .trim()
   .regex(/^[A-Za-z0-9_-]{1,64}$/, 'an Apollo id');
 const ids = (max: number) => z.array(apolloId).min(1).max(max);
+/**
+ * An id that becomes a path segment: Apollo's own form, 24 hex digits. A word such as "search" would otherwise reach a
+ * collection route that shares the record's path template.
+ */
+const pathId = z
+  .string()
+  .trim()
+  .regex(/^[0-9a-fA-F]{24}$/, 'an Apollo id of 24 hex digits');
 const shortText = (max = 200) => z.string().trim().min(1).max(max);
 const isoDate = z
   .string()
@@ -509,7 +519,46 @@ export const GATEWAY_TOOLS: readonly GatewayTool[] = [
       revealPersonalEmails: z.boolean().optional(),
     },
     async run(client, input) {
-      return bulkEnrichPeople(asServerClient(client), { ...(input as unknown as Parameters<typeof bulkEnrichPeople>[1]), concurrency: 1 });
+      // One chunk of ten at a time, each retried on Apollo's 429. A failure Apollo answers before anything was enriched,
+      // or a refused key, plan or credit balance, fails the whole call with its status, so a host sees it; a later
+      // chunk that fails is kept as failed items next to the people already enriched (their credits are spent).
+      const details = input.details as Array<Record<string, unknown>>;
+      const fields: Record<string, string> = {
+        id: 'id', firstName: 'first_name', lastName: 'last_name', name: 'name', email: 'email',
+        organizationName: 'organization_name', domain: 'domain', linkedinUrl: 'linkedin_url',
+      };
+      const results: Array<{ index: number; ok: boolean; person?: unknown; error?: string }> = [];
+      for (let start = 0; start < details.length; start += 10) {
+        const chunk = details.slice(start, start + 10);
+        let answer: Record<string, unknown> | undefined;
+        try {
+          answer = asObject(
+            await callWithRateLimitRetry(() =>
+              client.post('/api/v1/people/bulk_match', { details: chunk.map(detail => body(detail, fields)) }, {
+                reveal_personal_emails: input.revealPersonalEmails === true ? true : undefined,
+              }),
+            ),
+          );
+        } catch (error) {
+          const status = error instanceof ApolloAnswerError ? error.status : undefined;
+          if (results.length === 0 || status === undefined || [401, 402, 403].includes(status)) throw error;
+          chunk.forEach((_, offset) =>
+            results.push({ index: start + offset, ok: false, error: `Apollo answered with HTTP ${status}.` }),
+          );
+          continue;
+        }
+        const matches = Array.isArray(answer?.matches) ? answer.matches : [];
+        chunk.forEach((_, offset) => {
+          const match = matches[offset];
+          results.push(
+            match === null || match === undefined
+              ? { index: start + offset, ok: false, error: 'No match found.' }
+              : { index: start + offset, ok: true, person: match },
+          );
+        });
+      }
+      const succeeded = results.filter(result => result.ok).length;
+      return { total: details.length, succeeded, failed: details.length - succeeded, results };
     },
   },
   {
@@ -592,7 +641,7 @@ export const GATEWAY_TOOLS: readonly GatewayTool[] = [
     riskLevel: 'read',
     summary: 'Contact.',
     upstream: [get('/api/v1/contacts/{contact_id}')],
-    input: { contactId: apolloId },
+    input: { contactId: pathId },
     async run(client, input) {
       return one(await client.get(`/api/v1/contacts/${id(input, 'contactId')}`), 'contact', CONTACT);
     },
@@ -627,7 +676,7 @@ export const GATEWAY_TOOLS: readonly GatewayTool[] = [
     riskLevel: 'read',
     summary: 'Account.',
     upstream: [get('/api/v1/accounts/{id}')],
-    input: { accountId: apolloId },
+    input: { accountId: pathId },
     async run(client, input) {
       return one(await client.get(`/api/v1/accounts/${id(input, 'accountId')}`), 'account', ACCOUNT);
     },
@@ -681,7 +730,7 @@ export const GATEWAY_TOOLS: readonly GatewayTool[] = [
     riskLevel: 'read',
     summary: 'Deal.',
     upstream: [get('/api/v1/opportunities/{opportunity_id}')],
-    input: { dealId: apolloId },
+    input: { dealId: pathId },
     async run(client, input) {
       return one(await client.get(`/api/v1/opportunities/${id(input, 'dealId')}`), 'opportunity', DEAL);
     },
@@ -802,7 +851,7 @@ export const GATEWAY_TOOLS: readonly GatewayTool[] = [
     riskLevel: 'write',
     summary: 'Contact updated.',
     upstream: [patch('/api/v1/contacts/{contact_id}')],
-    input: { contactId: apolloId, ...contactFields },
+    input: { contactId: pathId, ...contactFields },
     async run(client, input) {
       requireChange(input, CONTACT_BODY);
       return one(await client.patch(`/api/v1/contacts/${id(input, 'contactId')}`, body(input, CONTACT_BODY)), 'contact', CONTACT);
@@ -863,7 +912,7 @@ export const GATEWAY_TOOLS: readonly GatewayTool[] = [
     riskLevel: 'write',
     summary: 'Account updated.',
     upstream: [patch('/api/v1/accounts/{account_id}')],
-    input: { accountId: apolloId, ...accountFields },
+    input: { accountId: pathId, ...accountFields },
     async run(client, input) {
       requireChange(input, ACCOUNT_BODY);
       return one(await client.patch(`/api/v1/accounts/${id(input, 'accountId')}`, body(input, ACCOUNT_BODY)), 'account', ACCOUNT);
@@ -906,7 +955,7 @@ export const GATEWAY_TOOLS: readonly GatewayTool[] = [
     riskLevel: 'write',
     summary: 'Deal updated.',
     upstream: [patch('/api/v1/opportunities/{opportunity_id}')],
-    input: { dealId: apolloId, ...dealUpdateFields },
+    input: { dealId: pathId, ...dealUpdateFields },
     async run(client, input) {
       requireChange(input, DEAL_BODY);
       return one(await client.patch(`/api/v1/opportunities/${id(input, 'dealId')}`, body(input, DEAL_BODY)), 'opportunity', DEAL);
@@ -952,7 +1001,7 @@ export const GATEWAY_TOOLS: readonly GatewayTool[] = [
     riskLevel: 'write',
     summary: 'Task completed.',
     upstream: [post('/api/v1/tasks/{id}/complete')],
-    input: { taskId: apolloId, note: z.string().trim().max(5000).optional() },
+    input: { taskId: pathId, note: z.string().trim().max(5000).optional() },
     async run(client, input) {
       const answer = await client.post(
         `/api/v1/tasks/${id(input, 'taskId')}/complete`,
@@ -974,7 +1023,7 @@ export const GATEWAY_TOOLS: readonly GatewayTool[] = [
     summary: 'Contacts added to the sequence.',
     upstream: [post('/api/v1/emailer_campaigns/{sequence_id}/add_contact_ids')],
     input: {
-      sequenceId: apolloId,
+      sequenceId: pathId,
       contactIds: ids(100),
       emailAccountId: apolloId.describe('The mailbox to send from (apollo_list_email_accounts).'),
       status: z.enum(['active', 'paused']).optional(),

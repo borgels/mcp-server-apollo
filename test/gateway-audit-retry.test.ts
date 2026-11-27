@@ -106,4 +106,48 @@ describe('the rate limit', () => {
     expect(calls).toBe(2);
     expect(result.structuredContent).toMatchObject({ succeeded: 1, failed: 0 });
   });
+
+  it('fails the whole call with its status when Apollo refuses the key, and audits it as an error', async () => {
+    const records: Array<Record<string, unknown>> = [];
+    const gw = createApolloGateway({
+      apiKey: TOKEN,
+      fetchImpl: async () => json({ error: 'bad key' }, 401),
+      policy: { audit: record => void records.push({ ...record }) },
+    });
+    const result = await gw.callTool('people_bulk_enrich', { details: [{ id: ID }] });
+    expect(result.isError).toBe(true);
+    expect(result.failure).toMatchObject({ httpStatus: 401 });
+    expect(records.map(record => record.action)).toEqual(['start', 'error']);
+  });
+
+  it('fails the whole call when the rate limit outlasts the retries', async () => {
+    let calls = 0;
+    const gw = createApolloGateway({
+      apiKey: TOKEN,
+      fetchImpl: async () => {
+        calls += 1;
+        return json({}, 429, { 'retry-after': '0' });
+      },
+    });
+    const result = await gw.callTool('people_bulk_enrich', { details: [{ id: ID }] });
+    expect(result.isError).toBe(true);
+    expect(result.failure).toMatchObject({ httpStatus: 429 });
+    expect(calls).toBeGreaterThan(1);
+  });
+
+  it('keeps the people already enriched when a later chunk fails, with the status only', async () => {
+    let calls = 0;
+    const gw = createApolloGateway({
+      apiKey: TOKEN,
+      fetchImpl: async () => {
+        calls += 1;
+        return calls === 1 ? json({ matches: Array.from({ length: 10 }, () => ({ id: ID })) }) : json({ error: 'Jane Doe' }, 500);
+      },
+    });
+    const details = Array.from({ length: 12 }, () => ({ id: ID }));
+    const result = await gw.callTool('people_bulk_enrich', { details });
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toMatchObject({ total: 12, succeeded: 10, failed: 2 });
+    expect(JSON.stringify(result)).not.toContain('Jane Doe');
+  });
 });

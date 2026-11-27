@@ -6,6 +6,7 @@ import { pathFits } from '../src/apollo/gateway-client.js';
 
 const TOKEN = 'qqqqwwwwzzzzxxxx1';
 const ID = '64b2f0c1a1b2c3d4e5f60718';
+const SEQ = '64b2f0c1a1b2c3d4e5f6aaaa';
 
 beforeEach(() => vi.unstubAllEnvs());
 afterEach(() => vi.unstubAllEnvs());
@@ -177,12 +178,12 @@ describe('requests', () => {
       emailer_campaign: { id: 'q1', name: 'Intro' },
     }));
     const result = await gateway(fetchImpl).callTool('add_contacts_to_sequence', {
-      sequenceId: 'q1',
+      sequenceId: SEQ,
       contactIds: [ID, 'abc'],
       emailAccountId: 'm1',
     });
-    expect(seen[0]!.path).toBe('/api/v1/emailer_campaigns/q1/add_contact_ids');
-    expect(seen[0]!.query.get('emailer_campaign_id')).toBe('q1');
+    expect(seen[0]!.path).toBe(`/api/v1/emailer_campaigns/${SEQ}/add_contact_ids`);
+    expect(seen[0]!.query.get('emailer_campaign_id')).toBe(SEQ);
     expect(seen[0]!.query.get('send_email_from_email_account_id')).toBe('m1');
     expect([...seen[0]!.query.keys()].some(key => key.startsWith('sequence_') || key.startsWith('contacts_without'))).toBe(false);
     expect(result.structuredContent).toEqual({
@@ -217,6 +218,15 @@ describe('requests', () => {
     const result = await gateway(fetchImpl).callTool('complete_task', { taskId: ID });
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toMatch(/nothing was completed/);
+  });
+
+  it('never lets a word in an id reach a collection route', async () => {
+    const { seen, fetchImpl } = recording(() => ({ opportunities: [] }));
+    const gw = createApolloGateway({ apiKey: TOKEN, fetchImpl, policy: { disabledTools: ['search_deals'] } });
+    for (const dealId of ['search', 'SEARCH', '../contacts', 'abc']) {
+      expect((await gw.callTool('get_deal', { dealId })).isError, dealId).toBe(true);
+    }
+    expect(seen).toEqual([]);
   });
 
   it('lists the stages of each kind', async () => {
@@ -268,7 +278,7 @@ describe('requests', () => {
       update_deal: { dealId: ID, amount: 5 },
       create_task: { userId: 'u1', contactId: ID, type: 'action_item', dueAt: '2026-12-01T09:00:00Z' },
       complete_task: { taskId: ID },
-      add_contacts_to_sequence: { sequenceId: 'q1', contactIds: [ID], emailAccountId: 'm1' },
+      add_contacts_to_sequence: { sequenceId: SEQ, contactIds: [ID], emailAccountId: 'm1' },
     };
     expect(Object.keys(samples).sort()).toEqual(apolloToolCatalog.map(tool => tool.name).sort());
     for (const tool of apolloToolCatalog) {
