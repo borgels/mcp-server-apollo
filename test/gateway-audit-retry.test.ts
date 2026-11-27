@@ -150,4 +150,31 @@ describe('the rate limit', () => {
     expect(result.structuredContent).toMatchObject({ total: 12, succeeded: 10, failed: 2 });
     expect(JSON.stringify(result)).not.toContain('Jane Doe');
   });
+
+  it('keeps the people already enriched and stops when a later chunk is refused or gets no answer', async () => {
+    for (const later of [() => json({ error: 'out of credits' }, 402), () => Promise.reject(new TypeError('fetch failed'))]) {
+      let calls = 0;
+      const gw = createApolloGateway({
+        apiKey: TOKEN,
+        fetchImpl: (async () => {
+          calls += 1;
+          return calls === 1 ? json({ matches: Array.from({ length: 10 }, () => ({ id: ID })) }) : later();
+        }) as typeof fetch,
+      });
+      const result = await gw.callTool('people_bulk_enrich', { details: Array.from({ length: 25 }, () => ({ id: ID })) });
+      expect(result.isError).toBeUndefined();
+      expect(result.structuredContent).toMatchObject({ total: 25, succeeded: 10, failed: 15 });
+      expect(calls).toBe(2);
+    }
+  });
+
+  it('masks other credentials in an enrichment answer that is passed on whole', async () => {
+    const gw = createApolloGateway({
+      apiKey: TOKEN,
+      fetchImpl: async () => json({ person: { id: ID, APOLLO_API_KEY: 'OTHERKEY-123456789', sendgrid_api_key_v3: 'SG.othersecret987' } }),
+    });
+    const result = await gw.callTool('person_enrich', { id: ID });
+    expect(result.isError).toBeUndefined();
+    expect(JSON.stringify(result)).not.toMatch(/OTHERKEY|othersecret/);
+  });
 });

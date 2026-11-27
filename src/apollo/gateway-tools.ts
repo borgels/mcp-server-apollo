@@ -519,9 +519,9 @@ export const GATEWAY_TOOLS: readonly GatewayTool[] = [
       revealPersonalEmails: z.boolean().optional(),
     },
     async run(client, input) {
-      // One chunk of ten at a time, each retried on Apollo's 429. A failure Apollo answers before anything was enriched,
-      // or a refused key, plan or credit balance, fails the whole call with its status, so a host sees it; a later
-      // chunk that fails is kept as failed items next to the people already enriched (their credits are spent).
+      // One chunk of ten at a time, each retried on Apollo's 429. A failure before anything was enriched fails the whole
+      // call with its status, so a host sees it. Once people are enriched (their credits are spent), a failing chunk
+      // stops the run: the people enriched so far are kept, and the rest are failed items with Apollo's status only.
       const details = input.details as Array<Record<string, unknown>>;
       const fields: Record<string, string> = {
         id: 'id', firstName: 'first_name', lastName: 'last_name', name: 'name', email: 'email',
@@ -540,12 +540,11 @@ export const GATEWAY_TOOLS: readonly GatewayTool[] = [
             ),
           );
         } catch (error) {
+          if (results.length === 0) throw error;
           const status = error instanceof ApolloAnswerError ? error.status : undefined;
-          if (results.length === 0 || status === undefined || [401, 402, 403].includes(status)) throw error;
-          chunk.forEach((_, offset) =>
-            results.push({ index: start + offset, ok: false, error: `Apollo answered with HTTP ${status}.` }),
-          );
-          continue;
+          const why = status === undefined ? 'Apollo did not answer; not tried further.' : `Apollo answered with HTTP ${status}; not tried further.`;
+          for (let index = start; index < details.length; index += 1) results.push({ index, ok: false, error: why });
+          break;
         }
         const matches = Array.isArray(answer?.matches) ? answer.matches : [];
         chunk.forEach((_, offset) => {

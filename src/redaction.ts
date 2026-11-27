@@ -66,8 +66,12 @@ const CREDENTIAL_NAME =
 
 /** Whether a field name names a credential, however it is written (case, `-`, `_`, spaces, a leading `x-`). */
 export function isCredentialField(name: string): boolean {
-  return CREDENTIAL_NAME.test(name.toLowerCase().replace(/[-_\s.]/g, ''));
+  const plain = name.toLowerCase().replace(/[-_\s.]/g, '');
+  return CREDENTIAL_NAME.test(plain) || CREDENTIAL_PART.test(plain);
 }
+
+/** A name that holds a credential word anywhere (APOLLO_API_KEY, sendgrid_api_key_v3, smtp_password). */
+const CREDENTIAL_PART = /(apikey|apisecret|clientsecret|secretkey|privatekey|password|passwd|accesstoken|refreshtoken|bearertoken|authtoken|sessiontoken)/;
 
 /**
  * One text as a gateway may return it: credential-shaped text masked, then the instance's own secrets, then the
