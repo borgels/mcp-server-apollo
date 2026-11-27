@@ -308,13 +308,13 @@ function buildApolloGateway(options: ApolloGatewayOptions, apiKey: string, redac
       const schema = SCHEMAS.get(name);
       if (!tool || !schema) {
         // Neither the audit record nor the answer repeats the name: it is the caller's text, not ours.
-        await writeGatewayAuditEvent({ tool: UNKNOWN_TOOL, action: 'rejected', reason: 'unsupported tool' });
+        await bestEffortAudit({ tool: UNKNOWN_TOOL, action: 'rejected', reason: 'unsupported tool' });
         return errorResult('Unsupported Apollo gateway tool.');
       }
 
       const parsed = schema.safeParse(input ?? {});
       if (!parsed.success) {
-        await writeGatewayAuditEvent({ tool: name, action: 'rejected', reason: 'invalid input' });
+        await bestEffortAudit({ tool: name, action: 'rejected', reason: 'invalid input' });
         return errorResult(redactText(`Invalid input for ${tool.name}: ${z.prettifyError(parsed.error)}`, redactor));
       }
       const values = parsed.data as Record<string, unknown>;

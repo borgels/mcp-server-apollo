@@ -69,6 +69,28 @@ describe('the audit sink', () => {
   });
 });
 
+describe('the audit sink on a refused call', () => {
+  it('never passes the sink’s error on for an unknown tool or invalid input', async () => {
+    const gw = createApolloGateway({
+      apiKey: TOKEN,
+      fetchImpl: async () => json({}),
+      policy: {
+        audit: () => {
+          throw new Error('connection refused by AUDITSINK-XYZ-77');
+        },
+      },
+    });
+    const unknown = await gw.callTool('no_such_tool', {});
+    const invalid = await gw.callTool('get_contact', { contactId: 'not an id!' });
+    for (const result of [unknown, invalid]) {
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result)).not.toContain('AUDITSINK');
+    }
+    expect(unknown.content[0]!.text).toBe('Unsupported Apollo gateway tool.');
+    expect(invalid.content[0]!.text).toMatch(/^Invalid input for get_contact/);
+  });
+});
+
 describe('the rate limit', () => {
   it('retries bulk enrichment after a 429 from Apollo', async () => {
     let calls = 0;
